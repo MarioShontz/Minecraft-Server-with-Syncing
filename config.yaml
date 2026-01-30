@@ -1,0 +1,70 @@
+# Minecraft Server Wrapper Configuration
+# ========================================
+
+# Server settings
+server:
+  # Path to the server folder (leave empty to use script directory)
+  folder: ""
+
+  # Name of the server JAR file
+  jar_name: "server.jar"
+
+  # Path to Java executable (or just "java" to use PATH)
+  java_path: "/opt/homebrew/opt/openjdk@21/bin/java" # example path for java installed via Homebrew
+
+  # JVM memory settings
+  min_memory: "1G"
+  max_memory: "4G"
+
+  # Additional JVM arguments (optional)
+  extra_args: []
+  # Example:
+  # extra_args:
+  #   - "-XX:+UseG1GC"
+  #   - "-XX:+ParallelRefProcEnabled"
+
+# Backup settings
+backup:
+  # Path to backup folder (REQUIRED - must be outside synced folder)
+  folder: ""
+
+  # Whether to automatically remove old backups
+  auto_prune: true
+
+  # Minimum number of backups to keep (only used if auto_prune is true)
+  keep_minimum: 5
+
+  # Delete backups older than this many days (only if above minimum)
+  keep_days: 30
+
+# Syncthing settings
+syncthing:
+  # Syncthing API URL
+  url: "http://localhost:8384"
+
+  # Syncthing folder ID for the Minecraft server folder
+  folder_id: ""
+
+  # API key is stored in secrets.{hostname}.yaml for security
+
+# Safety settings
+safety:
+  # Seconds between heartbeat updates
+  heartbeat_interval: 30
+
+  # Seconds before a lock is considered stale
+  stale_threshold: 60
+
+  # Seconds to wait for sync propagation during startup
+  race_wait: 10
+
+  # Maximum seconds to wait for Syncthing to finish syncing
+  sync_wait_timeout: 300
+
+# Logging settings
+logging:
+  # Log file name (created in server folder)
+  file: "mc-server.log"
+
+  # Log level: DEBUG, INFO, WARNING, ERROR
+  level: "INFO"
