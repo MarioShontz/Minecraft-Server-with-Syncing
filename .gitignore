@@ -1,0 +1,21 @@
+# Ignore everything by default
+*
+
+# Allow these top-level files
+!.gitignore
+!README.md
+!mc-server.py
+!requirements.txt
+
+# Allow the lib directory itself
+!lib/
+
+# Ignore everything inside lib by default
+lib/*
+
+# But allow Python files inside lib
+!lib/*.py
+
+# Always ignore Python cache
+**/__pycache__/
+**/*.pyc
