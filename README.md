@@ -15,8 +15,9 @@ A Python-based wrapper for safely managing a shared Minecraft server between mul
 
 - Python 3.8+
 - PyYAML (`pip install pyyaml`)
-- Java (for running Minecraft server)
-- Syncthing (optional, for sync management)
+- Java (for running Minecraft server. Only tested with OpenJDK 21)
+- Syncthing (for sync management)
+- Each member device configured with a hostname in router settings.
 
 ## Quick Start
 
