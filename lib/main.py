@@ -377,19 +377,34 @@ class Wrapper:
         """
         Acquire the lock with race condition prevention.
 
+        Syncthing must still be running (not paused) when this is called,
+        so the lock file can sync to the other machine.
+
         Returns:
             True if lock acquired
         """
+        import time
+
         # We don't have PID yet, use 0 as placeholder
         # We'll update it after server starts
         if not self.lock_manager.write_lock(pid=0):
             print(f"[mc-server] {Colors.error('Failed to create lock file')}")
             return False
 
-        print(f"[mc-server] Created lock file, waiting {self.config.safety.race_wait}s for sync...")
+        # Trigger an immediate Syncthing rescan so it detects the lock file
+        # without waiting for the filesystem watcher delay
+        if self.syncthing.enabled:
+            print(f"[mc-server] Triggering Syncthing scan for lock file...")
+            self.syncthing.trigger_scan()
 
-        import time
+        print(f"[mc-server] Created lock file, waiting {self.config.safety.race_wait}s for sync...")
         time.sleep(self.config.safety.race_wait)
+
+        # Wait for Syncthing to finish syncing the lock file to/from other devices
+        if self.syncthing.enabled:
+            print(f"[mc-server] Waiting for Syncthing to finish syncing lock file...")
+            if not self.syncthing.wait_for_sync(timeout=30, poll_interval=2):
+                print(f"[mc-server] {Colors.warning('Sync did not complete, proceeding anyway')}")
 
         # Re-read to check for race condition
         lock_info = self.lock_manager.read_lock()
@@ -467,8 +482,10 @@ class Wrapper:
         # Prune old backups
         self.backup_manager.prune_backups()
 
-        # Resume Syncthing
+        # Resume Syncthing and trigger scan so lock deletion syncs promptly
         self.resume_syncthing()
+        if self.syncthing.enabled:
+            self.syncthing.trigger_scan()
 
         # Cleanup
         self.server.cleanup()
