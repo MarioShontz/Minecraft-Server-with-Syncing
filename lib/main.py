@@ -107,15 +107,13 @@ class Wrapper:
         else:
             print(f"  {Colors.success('✓')} Backup folder: {self.config.backup.folder}")
 
-        # Check Syncthing
-        if self.syncthing.enabled:
-            if self.syncthing.check_connection():
-                print(f"  {Colors.success('✓')} Syncthing: Connected to {self.config.syncthing.url}")
-            else:
-                print(f"  {Colors.warning('!')} Syncthing: Not reachable at {self.config.syncthing.url}")
-                # Not a fatal error
+        # Check Syncthing - REQUIRED for safe operation
+        if self.syncthing.check_connection():
+            print(f"  {Colors.success('✓')} Syncthing: Connected to {self.config.syncthing.url}")
         else:
-            print(f"  {Colors.warning('!')} Syncthing: Disabled (no API key)")
+            print(f"  {Colors.error('✗')} Syncthing: Not reachable at {self.config.syncthing.url}")
+            print(f"  {Colors.error('Cannot start without Syncthing for lock coordination')}")
+            all_ok = False
 
         # Config validation warnings
         warnings = validate_config(self.config)
@@ -132,9 +130,6 @@ class Wrapper:
         Returns:
             True if OK to proceed
         """
-        if not self.syncthing.enabled:
-            return True
-
         try:
             status = self.syncthing.get_folder_status()
 
@@ -146,35 +141,30 @@ class Wrapper:
             if status.has_errors:
                 print(f"[mc-server] Syncthing: {Colors.error('Has errors')}")
                 print(f"[mc-server] {status}")
-                if not confirm_action("Proceed anyway?"):
-                    return False
-                return True
+                print(f"[mc-server] {Colors.error('Cannot start with Syncthing errors')}")
+                return False
 
             if status.is_syncing:
                 print(f"[mc-server] Syncthing is currently syncing...")
                 if self.syncthing.wait_for_sync(timeout=self.config.safety.sync_wait_timeout):
                     return True
                 else:
-                    print(f"\n[mc-server] {Colors.warning('Sync wait timed out')}")
-                    if not confirm_action("Proceed anyway?"):
-                        return False
-                    return True
+                    print(f"\n[mc-server] {Colors.error('Sync wait timed out')}")
+                    print(f"[mc-server] {Colors.error('Cannot start without sync completion')}")
+                    return False
 
             # Unknown state
             print(f"[mc-server] Syncthing state: {status.state}")
             return True
 
         except SyncthingUnavailable as e:
-            print(f"[mc-server] {Colors.warning('Syncthing not reachable:')} {e}")
-            if not confirm_action("Proceed without sync management? (risky)"):
-                return False
-            return True
+            print(f"[mc-server] {Colors.error('Syncthing not reachable:')} {e}")
+            print(f"[mc-server] {Colors.error('Cannot start without Syncthing')}")
+            return False
 
         except SyncthingError as e:
             print(f"[mc-server] {Colors.error('Syncthing error:')} {e}")
-            if not confirm_action("Proceed anyway?"):
-                return False
-            return True
+            return False
 
     def handle_lock(self) -> bool:
         """
@@ -351,21 +341,17 @@ class Wrapper:
 
     def pause_syncthing(self) -> bool:
         """Pause Syncthing sync."""
-        if not self.syncthing.enabled:
-            return True
-
         if self.syncthing.pause_folder():
             self._syncthing_paused = True
             return True
         else:
-            print(f"[mc-server] {Colors.warning('Failed to pause Syncthing')}")
-            if not confirm_action("Continue anyway?"):
-                return False
-            return True
+            print(f"[mc-server] {Colors.error('Failed to pause Syncthing')}")
+            print(f"[mc-server] {Colors.error('Cannot start without exclusive access')}")
+            return False
 
     def resume_syncthing(self) -> None:
         """Resume Syncthing sync."""
-        if not self.syncthing.enabled or not self._syncthing_paused:
+        if not self._syncthing_paused:
             return
 
         if self.syncthing.resume_folder():
@@ -393,18 +379,21 @@ class Wrapper:
 
         # Trigger an immediate Syncthing rescan so it detects the lock file
         # without waiting for the filesystem watcher delay
-        if self.syncthing.enabled:
-            print(f"[mc-server] Triggering Syncthing scan for lock file...")
-            self.syncthing.trigger_scan()
+        print(f"[mc-server] Triggering Syncthing scan for lock file...")
+        if not self.syncthing.trigger_scan():
+            print(f"[mc-server] {Colors.error('Failed to trigger Syncthing scan')}")
+            self.lock_manager.delete_lock()
+            return False
 
         print(f"[mc-server] Created lock file, waiting {self.config.safety.race_wait}s for sync...")
         time.sleep(self.config.safety.race_wait)
 
         # Wait for Syncthing to finish syncing the lock file to/from other devices
-        if self.syncthing.enabled:
-            print(f"[mc-server] Waiting for Syncthing to finish syncing lock file...")
-            if not self.syncthing.wait_for_sync(timeout=30, poll_interval=2):
-                print(f"[mc-server] {Colors.warning('Sync did not complete, proceeding anyway')}")
+        print(f"[mc-server] Waiting for Syncthing to finish syncing lock file...")
+        if not self.syncthing.wait_for_sync(timeout=30, poll_interval=2):
+            print(f"[mc-server] {Colors.error('Lock file sync failed')}")
+            self.lock_manager.delete_lock()
+            return False
 
         # Re-read to check for race condition
         lock_info = self.lock_manager.read_lock()

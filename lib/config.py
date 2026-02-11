@@ -1,7 +1,7 @@
 """
 Configuration loading and validation for the Minecraft server wrapper.
 
-Handles loading config.yaml and secrets.{hostname}.yaml files.
+Handles loading config.yaml and secrets.yaml files.
 """
 
 import os
@@ -116,24 +116,20 @@ def find_config_file() -> Optional[Path]:
 
 def find_secrets_file() -> Optional[Path]:
     """
-    Find the secrets file for this hostname.
+    Find the unified secrets.yaml file.
 
     Returns:
         Path to secrets file, or None if not found
     """
-    hostname = get_hostname()
-    secrets_name = f"secrets.{hostname}.yaml"
-
-    # Check same directory as script first
     script_dir = Path(__file__).parent.parent
-    local_secrets = script_dir / secrets_name
-    if local_secrets.exists():
-        return local_secrets
 
-    # Check user config directory
-    user_secrets = Path.home() / ".config" / "mc-server" / secrets_name
-    if user_secrets.exists():
-        return user_secrets
+    # Check standard locations for unified secrets.yaml
+    for location in [
+        script_dir / "secrets.yaml",
+        Path.home() / ".config" / "mc-server" / "secrets.yaml",
+    ]:
+        if location.exists():
+            return location
 
     return None
 
@@ -213,12 +209,17 @@ def parse_backup_config(data: dict[str, Any], server_folder: Path) -> BackupConf
 def parse_syncthing_config(data: dict[str, Any], secrets: dict[str, Any]) -> SyncthingConfig:
     """Parse Syncthing configuration section."""
     syncthing_data = data.get('syncthing', {})
-    secrets_syncthing = secrets.get('syncthing', {})
+
+    # Look up API key by hostname in unified secrets file
+    hostname = get_hostname()
+    machines = secrets.get('machines', {})
+    machine_config = machines.get(hostname, {})
+    api_key = machine_config.get('syncthing_api_key', '')
 
     return SyncthingConfig(
         url=syncthing_data.get('url', 'http://localhost:8384'),
         folder_id=syncthing_data.get('folder_id', 'minecraft-server'),
-        api_key=secrets_syncthing.get('api_key', ''),
+        api_key=api_key,
     )
 
 
@@ -340,11 +341,9 @@ def load_config() -> Config:
         logger.debug(f"Loading secrets from: {secrets_path}")
         secrets_data = load_yaml_file(secrets_path)
     else:
-        hostname = get_hostname()
-        logger.warning(
-            f"Secrets file not found for {hostname}. "
-            f"Expected secrets.{hostname}.yaml in script directory "
-            f"or ~/.config/mc-server/"
+        raise ConfigError(
+            "Secrets file not found. Expected secrets.yaml in script directory "
+            "or ~/.config/mc-server/secrets.yaml"
         )
 
     # Parse all sections
@@ -353,6 +352,14 @@ def load_config() -> Config:
     syncthing_config = parse_syncthing_config(config_data, secrets_data)
     safety_config = parse_safety_config(config_data)
     logging_config = parse_logging_config(config_data)
+
+    # Validate Syncthing API key is present (required for safe operation)
+    hostname = get_hostname()
+    if not syncthing_config.api_key:
+        raise ConfigError(
+            f"Syncthing API key not found for hostname '{hostname}'. "
+            f"Add entry to secrets.yaml under 'machines.{hostname}.syncthing_api_key'"
+        )
 
     return Config(
         server=server_config,
@@ -379,10 +386,6 @@ def validate_config(config: Config) -> list[str]:
     # Check world folder exists (may not exist on first run)
     if not config.world_folder.exists():
         warnings.append(f"World folder not found: {config.world_folder} (may be created on first run)")
-
-    # Check Syncthing API key
-    if not config.syncthing.api_key:
-        warnings.append("Syncthing API key not configured - sync management will be disabled")
 
     # Validate memory settings
     for mem in [config.server.min_memory, config.server.max_memory]:
